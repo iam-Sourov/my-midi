@@ -1,702 +1,1061 @@
 "use client"
 
-import React, { useEffect, useState, useRef, useMemo } from "react"
+import React, { useEffect, useState, useRef, useMemo, useCallback } from "react"
 import * as Tone from "tone"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { Download, Mic, Square, Volume2, Cable, ArrowLeftRight, Settings2, Guitar, Guitar as GuitarIcon, Drumstroke, Disc3 } from "lucide-react"
+import {
+  Download,
+  Mic,
+  Square,
+  Volume2,
+  VolumeX,
+  Cable,
+  Piano,
+  Settings2,
+  Guitar as GuitarIcon,
+  Disc3,
+  HelpCircle,
+  X,
+  Sliders,
+  Play,
+  RotateCcw,
+  Sparkles,
+  Music2,
+  Layers,
+  Radio
+} from "lucide-react"
 
-const FULL_KEYBOARD_MAP = {
-  z: 0, s: 1, x: 2, d: 3, c: 4, v: 5, g: 6, b: 7, h: 8, n: 9, j: 10, m: 11,
-  ",": 12, ".": 14, "/": 16,
-  q: 12, "2": 13, w: 14, "3": 15, e: 16, r: 17, "5": 18, t: 19, "6": 20, y: 21,
-  "7": 22, u: 23, i: 24, "9": 25, o: 26, "0": 27, p: 28, "[": 29, "=": 30, "]": 31
+// Complete Computer Keyboard to Semitone Mapping for Melodic Instruments
+// Offset from base MIDI note (e.g. C3 = 48)
+const KEYBOARD_NOTE_MAP = {
+  // Lower Octave
+  z: { offset: 0, label: "Z" },   // C
+  s: { offset: 1, label: "S" },   // C#
+  x: { offset: 2, label: "X" },   // D
+  d: { offset: 3, label: "D" },   // D#
+  c: { offset: 4, label: "C" },   // E
+  v: { offset: 5, label: "V" },   // F
+  g: { offset: 6, label: "G" },   // F#
+  b: { offset: 7, label: "B" },   // G
+  h: { offset: 8, label: "H" },   // G#
+  n: { offset: 9, label: "N" },   // A
+  j: { offset: 10, label: "J" },  // A#
+  m: { offset: 11, label: "M" },  // B
+  ",": { offset: 12, label: "," }, // C+1
+  l: { offset: 13, label: "L" },  // C#+1
+  ".": { offset: 14, label: "." }, // D+1
+  ";": { offset: 15, label: ";" }, // D#+1
+  "/": { offset: 16, label: "/" }, // E+1
+
+  // Upper Octave
+  q: { offset: 12, label: "Q" },  // C+1
+  "2": { offset: 13, label: "2" }, // C#+1
+  w: { offset: 14, label: "W" },  // D+1
+  "3": { offset: 15, label: "3" }, // D#+1
+  e: { offset: 16, label: "E" },  // E+1
+  r: { offset: 17, label: "R" },  // F+1
+  "5": { offset: 18, label: "5" }, // F#+1
+  t: { offset: 19, label: "T" },  // G+1
+  "6": { offset: 20, label: "6" }, // G#+1
+  y: { offset: 21, label: "Y" },  // A+1
+  "7": { offset: 22, label: "7" }, // A#+1
+  u: { offset: 23, label: "U" },  // B+1
+  i: { offset: 24, label: "I" },  // C+2
+  "9": { offset: 25, label: "9" }, // C#+2
+  o: { offset: 26, label: "O" },  // D+2
+  "0": { offset: 27, label: "0" }, // D#+2
+  p: { offset: 28, label: "P" },  // E+2
+  "[": { offset: 29, label: "[" }, // F+2
+  "=": { offset: 30, label: "=" }, // F#+2
+  "]": { offset: 31, label: "]" }  // G+2
 }
 
-const INSTRUMENT_OPTIONS = [
-  { value: "Synth", label: "Classic Synth" },
-  { value: "Guitar", label: "Plucked Guitar" },
-  { value: "Bass", label: "Electric Bass" },
-  { value: "Drums", label: "Drum Kit" }
-];
+// Computer Keyboard mapping for MPC Drum Kit
+const DRUM_KEY_MAP = {
+  "1": "kick", a: "kick",
+  "2": "snare", s: "snare",
+  "3": "hihat", d: "hihat",
+  "4": "hihatOpen", f: "hihatOpen",
+  "5": "tomLow", q: "tomLow",
+  "6": "tomHigh", w: "tomHigh",
+  "7": "crash", e: "crash",
+  "8": "ride", r: "ride"
+}
 
-const STRINGS_COUNT = 6;
-const FRETS_COUNT = 15;
+// Available Essential Instruments
+const INSTRUMENTS = [
+  { id: "Piano", name: "Grand Piano", category: "Keys", icon: Piano, color: "from-blue-500 to-cyan-500", desc: "Acoustic Concert Grand" },
+  { id: "Synth", name: "Analog Synth", category: "Synth", icon: Settings2, color: "from-indigo-500 to-purple-500", desc: "Punchy Lead & Sub" },
+  { id: "Rhodes", name: "Rhodes E-Piano", category: "Keys", icon: Music2, color: "from-amber-500 to-yellow-500", desc: "Warm Vintage Bell Keys" },
+  { id: "Guitar", name: "Acoustic Guitar", category: "Plucked", icon: GuitarIcon, color: "from-orange-500 to-amber-600", desc: "Natural Nylon Strings" },
+  { id: "Bass", name: "Electric Bass", category: "Bass", icon: Radio, color: "from-emerald-500 to-teal-600", desc: "Deep Punchy 4-String" },
+  { id: "Strings", name: "Strings Ensemble", category: "Pad", icon: Layers, color: "from-rose-500 to-pink-600", desc: "Cinematic Sustained Pad" },
+  { id: "Organ", name: "Drawbar Organ", category: "Keys", icon: Sparkles, color: "from-violet-500 to-fuchsia-600", desc: "Classic Tonewheel Organ" },
+  { id: "Drums", name: "MPC Drum Kit", category: "Percussion", icon: Disc3, color: "from-red-500 to-orange-500", desc: "Studio 8-Pad Drum Machine" }
+]
+
+// Drum Pads definition
+const DRUM_PADS = [
+  { key: "kick", label: "Kick Drum", note: "C3", hotkeys: ["1", "A"], color: "from-red-600/30 to-red-900/50 border-red-500/40 text-red-300" },
+  { key: "snare", label: "Snare Drum", note: "D3", hotkeys: ["2", "S"], color: "from-slate-300/20 to-slate-600/40 border-slate-400/40 text-slate-200" },
+  { key: "hihat", label: "Closed Hat", note: "F3", hotkeys: ["3", "D"], color: "from-yellow-600/30 to-amber-800/50 border-yellow-500/40 text-yellow-300" },
+  { key: "hihatOpen", label: "Open Hat", note: "F#3", hotkeys: ["4", "F"], color: "from-amber-500/30 to-orange-800/50 border-amber-500/40 text-amber-300" },
+  { key: "tomLow", label: "Low Tom", note: "E3", hotkeys: ["5", "Q"], color: "from-indigo-600/30 to-purple-900/50 border-indigo-500/40 text-indigo-300" },
+  { key: "tomHigh", label: "High Tom", note: "G3", hotkeys: ["6", "W"], color: "from-cyan-600/30 to-blue-900/50 border-cyan-500/40 text-cyan-300" },
+  { key: "crash", label: "Crash Cymbal", note: "A3", hotkeys: ["7", "E"], color: "from-emerald-600/30 to-teal-900/50 border-emerald-500/40 text-emerald-300" },
+  { key: "ride", label: "Ride Cymbal", note: "B3", hotkeys: ["8", "R"], color: "from-purple-600/30 to-fuchsia-900/50 border-purple-500/40 text-purple-300" }
+]
+
+const FRETS_COUNT = 12
+const STRINGS_COUNT = 6
 
 export default function MidiKeyboard() {
-  const [isReady, setIsReady] = useState(false)
-  const [isRecording, setIsRecording] = useState(false)
-  const [activeNotes, setActiveNotes] = useState(new Set())
-  const [recordedUrl, setRecordedUrl] = useState(null)
+  // Application State
+  const [isAudioStarted, setIsAudioStarted] = useState(false)
+  const [instrument, setInstrument] = useState("Piano")
   const [baseOctave, setBaseOctave] = useState(3)
-  const [midiAccess, setMidiAccess] = useState(false)
-  const [instrument, setInstrument] = useState("Synth")
+  const [volume, setVolume] = useState(85)
+  const [isMuted, setIsMuted] = useState(false)
+  const [activeNotes, setActiveNotes] = useState(new Set())
+  const [activeDrumKeys, setActiveDrumKeys] = useState(new Set())
 
-  const synth = useRef(null)
-  const drumSynths = useRef(null)
-  const recorder = useRef(null)
+  // Recording State
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordedUrl, setRecordedUrl] = useState(null)
+  const [recordTime, setRecordTime] = useState(0)
+
+  // Metronome State
+  const [isMetronomePlaying, setIsMetronomePlaying] = useState(false)
+  const [bpm, setBpm] = useState(120)
+
+  // System & UI State
+  const [midiConnected, setMidiConnected] = useState(false)
+  const [showHelpModal, setShowHelpModal] = useState(false)
+
+  // Refs
+  const synthRef = useRef(null)
+  const drumSynthsRef = useRef(null)
+  const recorderRef = useRef(null)
   const activeKeyMap = useRef(new Map())
+  const recordTimerRef = useRef(null)
+  const metronomeLoopRef = useRef(null)
+  const metronomeClickRef = useRef(null)
 
+  // Generate Piano Keys
   const { whiteKeys, blackKeys } = useMemo(() => {
     const white = []
     const black = []
     let whiteIndex = 0
 
-    for (let m = 36; m <= 96; m++) {
+    const startMidi = baseOctave * 12 + 12
+    const endMidi = startMidi + 36
+
+    for (let m = startMidi; m <= endMidi; m++) {
       const freq = Tone.Frequency(m, "midi")
       const note = freq.toNote()
-      const isBlack = note.includes("#")
+      const isBlackNote = note.includes("#")
 
-      if (!isBlack) {
-        white.push({ note, midi: m, index: whiteIndex })
+      const semitoneOffset = m - startMidi
+      const keyBinding = Object.entries(KEYBOARD_NOTE_MAP).find(
+        ([_, val]) => val.offset === semitoneOffset
+      )
+      const hotkeyLabel = keyBinding ? keyBinding[1].label : null
+
+      if (!isBlackNote) {
+        white.push({ note, midi: m, index: whiteIndex, hotkey: hotkeyLabel })
         whiteIndex++
       } else {
-        black.push({ note, midi: m, positionIndex: whiteIndex })
+        black.push({ note, midi: m, positionIndex: whiteIndex, hotkey: hotkeyLabel })
       }
     }
     return { whiteKeys: white, blackKeys: black }
-  }, []);
+  }, [baseOctave])
 
-  const initDrumKit = () => {
-    if (drumSynths.current) {
-      Object.values(drumSynths.current).forEach(d => d.synth.dispose())
+  // Initialize Master Audio Output & Volume Control
+  const ensureAudioStarted = useCallback(async () => {
+    if (Tone.context.state !== "running") {
+      await Tone.start()
+    }
+    if (!isAudioStarted) {
+      setIsAudioStarted(true)
+    }
+  }, [isAudioStarted])
+
+  // Initialize Metronome click synth
+  useEffect(() => {
+    metronomeClickRef.current = new Tone.MembraneSynth({
+      pitchDecay: 0.005,
+      octaves: 2,
+      envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.05 },
+      volume: -10
+    }).toDestination()
+
+    return () => {
+      metronomeClickRef.current?.dispose()
+    }
+  }, [])
+
+  // Metronome Loop Effect
+  useEffect(() => {
+    if (!isAudioStarted || !isMetronomePlaying) {
+      if (metronomeLoopRef.current) {
+        metronomeLoopRef.current.stop()
+        metronomeLoopRef.current.dispose()
+        metronomeLoopRef.current = null
+      }
+      Tone.getTransport().stop()
+      return
     }
 
-    drumSynths.current = {
-      kick: { synth: new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 4, envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0 } }).toDestination(), play: (time) => drumSynths.current.kick.synth.triggerAttack("C1", time) },
-      snare: { synth: new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0 } }).toDestination(), play: (time) => drumSynths.current.snare.synth.triggerAttack(time) },
-      hihat: { synth: new Tone.MetalSynth({ frequency: 200, envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5 }).toDestination(), play: (time) => drumSynths.current.hihat.synth.triggerAttack(time) },
-      hihatOpen: { synth: new Tone.MetalSynth({ frequency: 200, envelope: { attack: 0.001, decay: 0.5, sustain: 0, release: 0 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5 }).toDestination(), play: (time) => drumSynths.current.hihatOpen.synth.triggerAttack(time) },
-      tomLow: { synth: new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 4, envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0 } }).toDestination(), play: (time) => drumSynths.current.tomLow.synth.triggerAttack("G2", time) },
-      tomHigh: { synth: new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 4, envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0 } }).toDestination(), play: (time) => drumSynths.current.tomHigh.synth.triggerAttack("C3", time) },
-      cymbal: { synth: new Tone.MetalSynth({ frequency: 200, envelope: { attack: 0.001, decay: 1.4, sustain: 0, release: 0 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5 }).toDestination(), play: (time) => drumSynths.current.cymbal.synth.triggerAttack(time) }
-    };
+    Tone.getTransport().bpm.value = bpm
 
-    if (recorder.current) {
-      Object.values(drumSynths.current).forEach(d => d.synth.connect(recorder.current))
+    metronomeLoopRef.current = new Tone.Loop((time) => {
+      metronomeClickRef.current?.triggerAttackRelease("C5", "16n", time)
+    }, "4n").start(0)
+
+    Tone.getTransport().start()
+
+    return () => {
+      if (metronomeLoopRef.current) {
+        metronomeLoopRef.current.stop()
+        metronomeLoopRef.current.dispose()
+        metronomeLoopRef.current = null
+      }
     }
-  }
+  }, [isMetronomePlaying, bpm, isAudioStarted])
 
-  const getSynthOptions = (type) => {
+  // Master Volume update
+  useEffect(() => {
+    const db = isMuted ? -Infinity : (volume === 0 ? -Infinity : Tone.gainToDb(volume / 100))
+    Tone.getDestination().volume.rampTo(db, 0.05)
+  }, [volume, isMuted])
+
+  // Initialize Drum Synthesizer Rack
+  const initDrumRack = useCallback(() => {
+    if (drumSynthsRef.current) {
+      Object.values(drumSynthsRef.current).forEach((item) => item.synth.dispose())
+    }
+
+    const output = Tone.getDestination()
+
+    drumSynthsRef.current = {
+      kick: {
+        synth: new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 6, envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0.1 }, volume: 4 }).connect(output),
+        play: (t) => drumSynthsRef.current.kick.synth.triggerAttackRelease("C1", "8n", t)
+      },
+      snare: {
+        synth: new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 0.25, sustain: 0 }, volume: 1 }).connect(output),
+        play: (t) => drumSynthsRef.current.snare.synth.triggerAttackRelease("16n", t)
+      },
+      hihat: {
+        synth: new Tone.MetalSynth({ frequency: 250, envelope: { attack: 0.001, decay: 0.08, release: 0.05 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5, volume: -4 }).connect(output),
+        play: (t) => drumSynthsRef.current.hihat.synth.triggerAttackRelease("16n", t)
+      },
+      hihatOpen: {
+        synth: new Tone.MetalSynth({ frequency: 220, envelope: { attack: 0.001, decay: 0.4, release: 0.2 }, harmonicity: 5.1, modulationIndex: 32, resonance: 3500, octaves: 1.5, volume: -4 }).connect(output),
+        play: (t) => drumSynthsRef.current.hihatOpen.synth.triggerAttackRelease("8n", t)
+      },
+      tomLow: {
+        synth: new Tone.MembraneSynth({ pitchDecay: 0.04, octaves: 3, envelope: { attack: 0.001, decay: 0.35, sustain: 0, release: 0.1 }, volume: 2 }).connect(output),
+        play: (t) => drumSynthsRef.current.tomLow.synth.triggerAttackRelease("G2", "8n", t)
+      },
+      tomHigh: {
+        synth: new Tone.MembraneSynth({ pitchDecay: 0.04, octaves: 3, envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.1 }, volume: 2 }).connect(output),
+        play: (t) => drumSynthsRef.current.tomHigh.synth.triggerAttackRelease("D3", "8n", t)
+      },
+      crash: {
+        synth: new Tone.MetalSynth({ frequency: 300, envelope: { attack: 0.001, decay: 1.2, release: 0.5 }, harmonicity: 4, modulationIndex: 40, resonance: 2000, octaves: 2, volume: -2 }).connect(output),
+        play: (t) => drumSynthsRef.current.crash.synth.triggerAttackRelease("4n", t)
+      },
+      ride: {
+        synth: new Tone.MetalSynth({ frequency: 450, envelope: { attack: 0.001, decay: 0.8, release: 0.3 }, harmonicity: 6, modulationIndex: 25, resonance: 5000, octaves: 1, volume: -4 }).connect(output),
+        play: (t) => drumSynthsRef.current.ride.synth.triggerAttackRelease("4n", t)
+      }
+    }
+
+    if (recorderRef.current) {
+      Object.values(drumSynthsRef.current).forEach((item) => item.synth.connect(recorderRef.current))
+    }
+  }, [])
+
+  // Create Instrument Synthesizer Voice
+  const createPolySynth = useCallback((type) => {
+    let newSynth
+
     switch (type) {
-      case "Guitar":
-        return {
-          harmonicity: 2.5, modulationIndex: 3,
-          oscillator: { type: "triangle" },
-          envelope: { attack: 0.01, decay: 1.5, sustain: 0.1, release: 1.2 },
-          modulation: { type: "square" },
-          modulationEnvelope: { attack: 0.01, decay: 0.5, sustain: 0, release: 0.5 },
+      case "Piano":
+        newSynth = new Tone.PolySynth(Tone.Synth, {
+          oscillator: { type: "triangle12" },
+          envelope: { attack: 0.005, decay: 1.2, sustain: 0.3, release: 1.4 },
           volume: 2
-        };
-      case "Bass":
-        return {
-          harmonicity: 1, modulationIndex: 5,
-          oscillator: { type: "triangle" },
-          envelope: { attack: 0.01, decay: 0.3, sustain: 0.4, release: 1.2 },
+        })
+        break
+
+      case "Rhodes":
+        newSynth = new Tone.PolySynth(Tone.FMSynth, {
+          harmonicity: 3,
+          modulationIndex: 2.5,
+          oscillator: { type: "sine" },
+          envelope: { attack: 0.005, decay: 1.8, sustain: 0.15, release: 1.5 },
           modulation: { type: "triangle" },
-          modulationEnvelope: { attack: 0.01, decay: 0.5, sustain: 0.5, release: 1.2 },
-          volume: 5,
-        };
+          modulationEnvelope: { attack: 0.01, decay: 0.6, sustain: 0.1, release: 1 },
+          volume: 3
+        })
+        break
+
+      case "Guitar":
+        newSynth = new Tone.PolySynth(Tone.FMSynth, {
+          harmonicity: 2.5,
+          modulationIndex: 4,
+          oscillator: { type: "triangle" },
+          envelope: { attack: 0.002, decay: 1.6, sustain: 0.08, release: 1.2 },
+          modulation: { type: "square" },
+          modulationEnvelope: { attack: 0.005, decay: 0.4, sustain: 0, release: 0.4 },
+          volume: 3
+        })
+        break
+
+      case "Bass":
+        newSynth = new Tone.PolySynth(Tone.FMSynth, {
+          harmonicity: 1,
+          modulationIndex: 6,
+          oscillator: { type: "sawtooth" },
+          envelope: { attack: 0.008, decay: 0.5, sustain: 0.5, release: 0.8 },
+          modulation: { type: "triangle" },
+          modulationEnvelope: { attack: 0.01, decay: 0.3, sustain: 0.2, release: 0.5 },
+          volume: 6
+        })
+        break
+
+      case "Strings":
+        newSynth = new Tone.PolySynth(Tone.AMSynth, {
+          harmonicity: 2,
+          oscillator: { type: "sawtooth" },
+          envelope: { attack: 0.4, decay: 2, sustain: 0.8, release: 2.5 },
+          modulation: { type: "sine" },
+          modulationEnvelope: { attack: 0.3, decay: 1.5, sustain: 0.7, release: 2 },
+          volume: 0
+        })
+        break
+
+      case "Organ":
+        newSynth = new Tone.PolySynth(Tone.Synth, {
+          oscillator: { type: "fatcustom", partials: [1, 0.5, 0.8, 0.3, 0.6], count: 3, spread: 20 },
+          envelope: { attack: 0.01, decay: 0.1, sustain: 0.95, release: 0.2 },
+          volume: 1
+        })
+        break
+
       case "Synth":
       default:
-        return {
-          oscillator: { type: "triangle" },
-          envelope: { attack: 0.005, decay: 0.1, sustain: 0.3, release: 1 },
-          volume: -4,
-        };
+        newSynth = new Tone.PolySynth(Tone.Synth, {
+          oscillator: { type: "sawtooth" },
+          envelope: { attack: 0.005, decay: 0.2, sustain: 0.4, release: 0.8 },
+          volume: 0
+        })
+        break
     }
-  }
 
-  const stopAllNotes = () => {
-    if (synth.current) {
-      synth.current.releaseAll()
+    const output = Tone.getDestination()
+    newSynth.connect(output)
+
+    if (recorderRef.current) {
+      newSynth.connect(recorderRef.current)
     }
+
+    return newSynth
+  }, [])
+
+  // Switch Instrument & re-initialize nodes
+  useEffect(() => {
+    if (!isAudioStarted) return
+
+    if (synthRef.current) {
+      synthRef.current.releaseAll()
+      synthRef.current.dispose()
+      synthRef.current = null
+    }
+
     setActiveNotes(new Set())
     activeKeyMap.current.clear()
-  }
-
-  useEffect(() => {
-    if (!isReady) return;
-
-    stopAllNotes();
-
-    if (synth.current) {
-      synth.current.releaseAll();
-      synth.current.dispose();
-      synth.current = null;
-    }
 
     if (instrument === "Drums") {
-      initDrumKit();
+      initDrumRack()
     } else {
-      let synthClass = Tone.Synth;
-      if (instrument === "Guitar" || instrument === "Bass") synthClass = Tone.FMSynth;
-
-      const newSynth = new Tone.PolySynth(synthClass, getSynthOptions(instrument)).toDestination();
-
-      if (recorder.current) {
-        newSynth.connect(recorder.current);
-      }
-      synth.current = newSynth;
+      synthRef.current = createPolySynth(instrument)
     }
-  }, [instrument, isReady]);
+  }, [instrument, isAudioStarted, createPolySynth, initDrumRack])
 
-  const mapDrumNote = (note) => {
-    const noteClass = note.replace(/\d+/, '');
-    switch (noteClass) {
-      case "C": return "kick";
-      case "D": return "snare";
-      case "E": return "tomLow";
-      case "F": return "hihat";
-      case "F#": return "hihatOpen";
-      case "G": return "tomHigh";
-      case "A": return "cymbal";
-      case "B": return "cymbal";
-      default: return "kick";
+  // Setup Recording Buffer
+  useEffect(() => {
+    recorderRef.current = new Tone.Recorder()
+  }, [])
+
+  // Web MIDI Setup
+  const setupWebMIDI = useCallback(() => {
+    if (typeof navigator !== "undefined" && navigator.requestMIDIAccess) {
+      navigator.requestMIDIAccess().then((access) => {
+        setMidiConnected(access.inputs.size > 0)
+
+        const handleMidiMessage = (msg) => {
+          ensureAudioStarted()
+          const [cmd, note, vel] = msg.data
+          const noteName = Tone.Frequency(note, "midi").toNote()
+
+          if (cmd === 144 && vel > 0) {
+            playNote(noteName)
+          } else if (cmd === 128 || (cmd === 144 && vel === 0)) {
+            stopNote(noteName)
+          }
+        }
+
+        access.inputs.forEach((input) => {
+          input.onmidimessage = handleMidiMessage
+        })
+
+        access.onstatechange = () => {
+          setMidiConnected(access.inputs.size > 0)
+        }
+      }).catch((e) => console.log("MIDI Access unsupported/denied", e))
     }
-  }
+  }, [ensureAudioStarted])
 
-  const getGuitarNote = (stringIdx, fretIdx) => {
-    // E Standard Tuning configuration: E2, A2, D3, G3, B3, E4
-    const baseMidiNotes = [64, 59, 55, 50, 45, 40];
-    const isBass = instrument === "Bass";
+  useEffect(() => {
+    setupWebMIDI()
+  }, [setupWebMIDI])
 
-    // Bass tuning: E1, A1, D2, G2
-    const bassMidiNotes = [43, 38, 33, 28];
-
-    const tuning = isBass && stringIdx >= 2 ? bassMidiNotes[stringIdx - 2] : baseMidiNotes[stringIdx];
-
-    // Handle bass trying to request string 1 or 2 (which we hide anyway but safely guard)
-    if (!tuning) return "E1";
-
-    const targetMidi = tuning + fretIdx;
-    return Tone.Frequency(targetMidi, "midi").toNote();
-  }
-
+  // Core Audio Playback Logic
   const playNote = (note) => {
-    if (instrument !== "Drums" && !synth.current) return;
-    if (instrument === "Drums" && !drumSynths.current) return;
+    ensureAudioStarted()
 
     setActiveNotes((prev) => {
       if (prev.has(note)) return prev
-
-      if (instrument === "Drums") {
-        const drumKey = mapDrumNote(note);
-        if (drumSynths.current[drumKey]) {
-          drumSynths.current[drumKey].play(Tone.now());
-        }
-      } else {
-        if (instrument === "Guitar" || instrument === "Bass") {
-          synth.current?.triggerAttackRelease(note, "4n")
-        } else {
-          synth.current?.triggerAttack(note)
-        }
-      }
-
-      const newSet = new Set(prev)
-      newSet.add(note)
-      return newSet
+      const next = new Set(prev)
+      next.add(note)
+      return next
     })
+
+    if (instrument === "Drums") {
+      const padKey = DRUM_PADS.find((p) => p.note === note)?.key || "kick"
+      triggerDrum(padKey)
+    } else if (synthRef.current) {
+      if (instrument === "Guitar" || instrument === "Bass") {
+        synthRef.current.triggerAttackRelease(note, "2n")
+      } else {
+        synthRef.current.triggerAttack(note)
+      }
+    }
   }
 
   const stopNote = (note) => {
     setActiveNotes((prev) => {
-      const newSet = new Set(prev)
-      newSet.delete(note)
-      return newSet
+      const next = new Set(prev)
+      next.delete(note)
+      return next
     })
 
-    if (instrument !== "Drums" && instrument !== "Guitar" && instrument !== "Bass" && synth.current) {
-      synth.current?.triggerRelease(note)
+    if (instrument !== "Drums" && instrument !== "Guitar" && instrument !== "Bass" && synthRef.current) {
+      synthRef.current.triggerRelease(note)
     }
   }
 
-  const initAudio = async () => {
-    if (isReady) return
-    await Tone.start()
-
-    const newRecorder = new Tone.Recorder()
-    recorder.current = newRecorder
-
-    if (instrument === "Drums") {
-      initDrumKit();
-    } else {
-      let synthClass = Tone.Synth;
-      if (instrument === "Guitar" || instrument === "Bass") synthClass = Tone.FMSynth;
-
-      const newSynth = new Tone.PolySynth(synthClass, getSynthOptions(instrument)).toDestination();
-      newSynth.connect(newRecorder);
-      synth.current = newSynth;
+  const triggerDrum = (drumKey) => {
+    ensureAudioStarted()
+    if (drumSynthsRef.current && drumSynthsRef.current[drumKey]) {
+      drumSynthsRef.current[drumKey].play(Tone.now())
     }
 
-    setIsReady(true)
-    setupWebMIDI()
+    setActiveDrumKeys((prev) => {
+      const next = new Set(prev)
+      next.add(drumKey)
+      return next
+    })
+
+    setTimeout(() => {
+      setActiveDrumKeys((prev) => {
+        const next = new Set(prev)
+        next.delete(drumKey)
+        return next
+      })
+    }, 150)
   }
 
-  const setupWebMIDI = () => {
-    if (typeof navigator !== "undefined" && navigator.requestMIDIAccess) {
-      navigator.requestMIDIAccess().then((access) => {
-        setMidiAccess(true)
-        const inputs = access.inputs.values()
-        for (const input of inputs) {
-          input.onmidimessage = (msg) => {
-            const [cmd, note, vel] = msg.data
-            const noteName = Tone.Frequency(note, "midi").toNote()
-            if (cmd === 144 && vel > 0) playNote(noteName)
-            if ((cmd === 128) || (cmd === 144 && vel === 0)) stopNote(noteName)
-          }
-        }
-      }).catch(e => console.log("MIDI Access Failed", e))
-    }
-  }
-
+  // Keyboard Event Handlers
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.repeat || !e.key) return
-      if (e.key === "ArrowLeft") { setBaseOctave(p => Math.max(1, p - 1)); return }
-      if (e.key === "ArrowRight") { setBaseOctave(p => Math.min(6, p + 1)); return }
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.repeat) return
 
-      const keyChar = e.key.toLowerCase()
-      if (activeKeyMap.current.has(keyChar)) return;
+      const key = e.key.toLowerCase()
 
-      const semitoneOffset = FULL_KEYBOARD_MAP[keyChar]
+      ensureAudioStarted()
 
-      if (semitoneOffset !== undefined) {
-        const baseMidi = (baseOctave + 1) * 12
-        const targetMidi = baseMidi + semitoneOffset
+      if (e.key === "ArrowLeft" || key === "<") {
+        setBaseOctave((p) => Math.max(1, p - 1))
+        return
+      }
+      if (e.key === "ArrowRight" || key === ">") {
+        setBaseOctave((p) => Math.min(6, p + 1))
+        return
+      }
+
+      if (key === "?") {
+        setShowHelpModal((p) => !p)
+        return
+      }
+
+      if (instrument === "Drums") {
+        const drumKey = DRUM_KEY_MAP[key]
+        if (drumKey) {
+          triggerDrum(drumKey)
+        }
+        return
+      }
+
+      if (activeKeyMap.current.has(key)) return
+
+      const binding = KEYBOARD_NOTE_MAP[key]
+      if (binding !== undefined) {
+        const startMidi = baseOctave * 12 + 12
+        const targetMidi = startMidi + binding.offset
         const note = Tone.Frequency(targetMidi, "midi").toNote()
+
         playNote(note)
-        activeKeyMap.current.set(keyChar, note)
+        activeKeyMap.current.set(key, note)
       }
     }
 
     const handleKeyUp = (e) => {
       if (!e.key) return
-      const keyChar = e.key.toLowerCase()
-      const note = activeKeyMap.current.get(keyChar)
+      const key = e.key.toLowerCase()
+
+      if (instrument === "Drums") return
+
+      const note = activeKeyMap.current.get(key)
       if (note) {
         stopNote(note)
-        activeKeyMap.current.delete(keyChar)
+        activeKeyMap.current.delete(key)
       }
     }
 
-    const handleWindowMouseUp = () => stopAllNotes();
-    const handleWindowBlur = () => stopAllNotes();
+    const handleWindowBlur = () => {
+      if (synthRef.current) synthRef.current.releaseAll()
+      setActiveNotes(new Set())
+      activeKeyMap.current.clear()
+    }
 
     window.addEventListener("keydown", handleKeyDown)
     window.addEventListener("keyup", handleKeyUp)
-    window.addEventListener("mouseup", handleWindowMouseUp)
     window.addEventListener("blur", handleWindowBlur)
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown)
       window.removeEventListener("keyup", handleKeyUp)
-      window.removeEventListener("mouseup", handleWindowMouseUp)
       window.removeEventListener("blur", handleWindowBlur)
     }
-  }, [isReady, baseOctave, instrument])
+  }, [baseOctave, instrument, ensureAudioStarted])
 
+  // Recording Controls
   const toggleRecording = async () => {
-    if (!recorder.current) return
+    ensureAudioStarted()
+    if (!recorderRef.current) return
+
     if (isRecording) {
-      const blob = await recorder.current.stop()
+      clearInterval(recordTimerRef.current)
+      const blob = await recorderRef.current.stop()
       setRecordedUrl(URL.createObjectURL(blob))
       setIsRecording(false)
     } else {
       setRecordedUrl(null)
-      recorder.current.start()
+      setRecordTime(0)
+      recorderRef.current.start()
       setIsRecording(true)
+
+      recordTimerRef.current = setInterval(() => {
+        setRecordTime((t) => t + 1)
+      }, 1000)
     }
   }
 
-  const handleKeyInteraction = (e, note, action) => {
-    if (e.type === "pointerdown" || e.type === "mousedown") {
-      e.preventDefault()
-    }
-    if (e.type === "pointerenter" && e.buttons !== 1) return;
-    if (action === "down") playNote(note)
-    if (action === "up") stopNote(note)
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
   }
 
-  // Visual Drum Pad configurations
-  const DRUM_PADS = [
-    { label: "Crash", icon: "cymbal", note: "A3", colSpan: 2, bg: "from-amber-600/20 to-yellow-600/40", hover: "hover:from-amber-500/40 hover:to-yellow-500/60", border: "border-amber-600/50" },
-    { label: "Ride", icon: "cymbal", note: "B3", colSpan: 2, bg: "from-orange-600/20 to-amber-600/40", hover: "hover:from-orange-500/40 hover:to-amber-500/60", border: "border-orange-600/50" },
-    { label: "High Tom", icon: "drum", note: "G3", colSpan: 1, rounded: "rounded-full", bg: "from-zinc-700/80 to-zinc-900", hover: "hover:from-zinc-600 hover:to-zinc-800", border: "border-zinc-500" },
-    { label: "Open Hat", icon: "hihat", note: "F#3", colSpan: 1, bg: "from-yellow-600/10 to-amber-700/30", hover: "hover:from-yellow-500/30 hover:to-amber-600/50", border: "border-yellow-600/40" },
-    { label: "Low Tom", icon: "drum", note: "E3", colSpan: 1, rounded: "rounded-full", bg: "from-zinc-700/80 to-zinc-900", hover: "hover:from-zinc-600 hover:to-zinc-800", border: "border-zinc-500" },
-    { label: "Closed Hat", icon: "hihat", note: "F3", colSpan: 1, bg: "from-yellow-600/10 to-amber-700/30", hover: "hover:from-yellow-500/30 hover:to-amber-600/50", border: "border-yellow-600/40" },
-    { label: "Snare", icon: "snare", note: "D3", colSpan: 2, bg: "from-slate-200/90 to-slate-400", text: "text-zinc-900", hover: "hover:from-white hover:to-slate-300", border: "border-slate-500" },
-    { label: "Kick", icon: "kick", note: "C3", colSpan: 2, bg: "from-zinc-800 to-black", hover: "hover:from-zinc-700 hover:to-zinc-950", border: "border-zinc-600 border-b-4", rowSpan: 2 },
-  ]
+  // Guitar Note Mapping helper
+  const getGuitarNote = (stringIdx, fretIdx) => {
+    const guitarTuning = [64, 59, 55, 50, 45, 40]
+    const bassTuning = [43, 38, 33, 28]
+
+    const baseMidi = instrument === "Bass"
+      ? (bassTuning[stringIdx] || 28)
+      : guitarTuning[stringIdx]
+
+    return Tone.Frequency(baseMidi + fretIdx, "midi").toNote()
+  }
 
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-zinc-950 via-zinc-900 to-black flex items-center justify-center p-4 selection:bg-indigo-500/30">
-      <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none mix-blend-overlay"></div>
+    <div
+      className="relative min-h-screen w-full flex flex-col justify-between p-4 sm:p-6 md:p-8 bg-gradient-to-b from-zinc-950 via-zinc-900 to-black select-none"
+      onClick={ensureAudioStarted}
+    >
+      {/* Background Subtle Ambient Glow */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-96 bg-indigo-500/5 blur-[140px] pointer-events-none rounded-full" />
+      <div className="absolute bottom-0 right-10 w-96 h-96 bg-purple-500/5 blur-[140px] pointer-events-none rounded-full" />
 
-      <Card className="w-full max-w-[1400px] backdrop-blur-md bg-zinc-900/80 border border-zinc-800 shadow-[0_0_50px_rgba(0,0,0,0.5)] rounded-2xl overflow-hidden relative z-10 transition-all duration-500">
-        <div className={cn(
-          "absolute top-0 left-0 w-full h-1 bg-gradient-to-r",
-          instrument === "Synth" ? "from-indigo-500 via-purple-500 to-pink-500" :
-            instrument === "Guitar" || instrument === "Bass" ? "from-amber-700 via-orange-500 to-yellow-600" :
-              "from-red-600 via-zinc-500 to-stone-400"
-        )}></div>
-
-        <CardHeader className="pb-4 border-b border-zinc-800/50 bg-zinc-900/50">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className={cn(
-                "w-12 h-12 rounded-xl flex items-center justify-center shadow-lg transition-colors",
-                instrument === "Synth" ? "bg-gradient-to-br from-indigo-500 to-purple-600 shadow-indigo-500/20" :
-                  instrument === "Guitar" || instrument === "Bass" ? "bg-gradient-to-br from-amber-700 to-orange-800 shadow-orange-900/40" :
-                    "bg-gradient-to-br from-zinc-700 to-zinc-950 shadow-black/50 border border-zinc-600"
-              )}>
-                {instrument === "Synth" && <Settings2 className="w-6 h-6 text-white" />}
-                {(instrument === "Guitar" || instrument === "Bass") && <GuitarIcon className="w-6 h-6 text-amber-100" />}
-                {instrument === "Drums" && <Disc3 className="w-6 h-6 text-zinc-300" />}
-              </div>
-              <div>
-                <CardTitle className="text-xl sm:text-2xl font-bold text-zinc-100 flex items-center gap-2 tracking-tight">
-                  Studio 88
-                  {midiAccess && (
-                    <Badge className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] px-2 py-0.5 rounded-full font-medium ml-2 shadow-[0_0_10px_rgba(16,185,129,0.2)]">
-                      <Cable className="w-3 h-3 mr-1 inline" /> MIDI
-                    </Badge>
-                  )}
-                </CardTitle>
-                <p className="text-xs text-zinc-400 font-medium tracking-wide">
-                  {instrument === "Synth" ? "Professional Digital Synthesizer" :
-                    instrument === "Guitar" ? "Acoustic Pluck Modeling" :
-                      instrument === "Bass" ? "Electric 4-String Bass" :
-                        "Dynamic Drum Rack"}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <Select value={instrument} onValueChange={setInstrument}>
-                <SelectTrigger className={cn(
-                  "w-[200px] bg-zinc-950/50 transition-colors shadow-inner font-semibold border-2",
-                  instrument === "Synth" ? "border-indigo-900 text-indigo-300 hover:border-indigo-700" :
-                    instrument === "Guitar" || instrument === "Bass" ? "border-amber-900 text-amber-300 hover:border-amber-700" :
-                      "border-zinc-700 text-zinc-300 hover:border-zinc-500"
-                )}>
-                  <SelectValue placeholder="Select Instrument" />
-                </SelectTrigger>
-                <SelectContent className="bg-zinc-900/95 backdrop-blur-xl border-zinc-700 text-zinc-200">
-                  {INSTRUMENT_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value} className="hover:bg-zinc-800 focus:bg-zinc-800 focus:text-white cursor-pointer py-3 rounded-md mx-1 my-1">
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              {instrument === "Synth" && (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-950/50 border border-zinc-800 text-xs text-zinc-300 font-mono shadow-inner">
-                  <ArrowLeftRight className="w-3.5 h-3.5 text-zinc-500" />
-                  <span className="font-semibold text-indigo-400">Octave</span>
-                  <span className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-100">C{baseOctave}</span>
-                </div>
+      {/* TOP STUDIO NAVIGATION & CONTROL BAR */}
+      <header className="relative z-20 w-full max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-zinc-900/60 backdrop-blur-xl border border-zinc-800 shadow-2xl">
+        {/* Brand & Audio State */}
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 text-white font-bold">
+            <Piano className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-bold tracking-tight text-white">MINIMALIST MIDI STUDIO</h1>
+              {midiConnected ? (
+                <Badge className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] px-2 py-0.5 font-medium">
+                  <Cable className="w-3 h-3 mr-1 inline" /> MIDI CONNECTED
+                </Badge>
+              ) : (
+                <Badge className="bg-zinc-800 text-zinc-400 border border-zinc-700 text-[10px] px-2 py-0.5">
+                  KEYBOARD READY
+                </Badge>
               )}
             </div>
+            <p className="text-xs text-zinc-400 font-mono">
+              Press computer keys to play • Octave <span className="text-indigo-400 font-bold">C{baseOctave}</span>
+            </p>
           </div>
-        </CardHeader>
+        </div>
 
-        <CardContent className="p-4 sm:p-6 space-y-6 relative overflow-visible">
-          {!isReady && (
-            <div className="absolute inset-0 z-50 bg-zinc-950/80 backdrop-blur-sm flex items-center justify-center rounded-b-2xl">
-              <Button
-                onClick={initAudio}
-                size="lg"
-                className="bg-zinc-100 text-zinc-950 hover:bg-white shadow-[0_0_30px_rgba(255,255,255,0.2)] hover:shadow-[0_0_40px_rgba(255,255,255,0.4)] transition-all scale-100 hover:scale-105 rounded-xl font-bold text-lg px-10 h-16"
-              >
-                <Volume2 className="w-6 h-6 mr-3" /> Connect Studio Pipeline
-              </Button>
-            </div>
-          )}
-
-          <div className="flex justify-between items-center bg-zinc-950/50 rounded-xl px-5 py-3 border border-zinc-800 shadow-inner">
-            <div className="flex items-center gap-3">
-              <div className="relative flex items-center justify-center">
-                <div className={cn("w-2.5 h-2.5 rounded-full z-10", isRecording ? "bg-red-500" : "bg-emerald-500")} />
-                {isRecording && <div className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-red-500 animate-ping opacity-75" />}
-              </div>
-              <span className={cn("text-xs font-bold tracking-wider", isRecording ? "text-red-400" : "text-emerald-400")}>
-                {isRecording ? "RECORDING..." : "SYSTEM READY"}
-              </span>
-            </div>
-
-            <div className="flex gap-3">
-              <Button
-                size="sm"
-                onClick={toggleRecording}
-                variant={isRecording ? "destructive" : "secondary"}
+        {/* Essential Instrument Tabs Selector */}
+        <div className="flex items-center gap-1.5 p-1 bg-zinc-950/80 rounded-xl border border-zinc-800 overflow-x-auto max-w-full">
+          {INSTRUMENTS.map((inst) => {
+            const Icon = inst.icon
+            const isSelected = instrument === inst.id
+            return (
+              <button
+                key={inst.id}
+                onClick={() => setInstrument(inst.id)}
                 className={cn(
-                  "h-9 px-4 font-semibold transition-all rounded-lg",
-                  isRecording ? "bg-red-500/10 text-red-500 border border-red-500/50 hover:bg-red-500/20" : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700 border border-zinc-700 hover:text-white"
+                  "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap",
+                  isSelected
+                    ? "bg-gradient-to-r text-white shadow-md shadow-indigo-500/10 " + inst.color
+                    : "text-zinc-400 hover:text-white hover:bg-zinc-800/60"
                 )}
               >
-                {isRecording ? <><Square className="w-4 h-4 mr-2" fill="currentColor" /> Stop</> : <><Mic className="w-4 h-4 mr-2" /> Record</>}
-              </Button>
+                <Icon className="w-3.5 h-3.5" />
+                <span>{inst.name}</span>
+              </button>
+            )
+          })}
+        </div>
 
-              {recordedUrl && (
-                <Button size="sm" variant="outline" asChild className="h-9 px-4 bg-zinc-800 text-zinc-100 border-zinc-700 hover:bg-zinc-700 rounded-lg transition-colors">
-                  <a href={recordedUrl} download={`studio-session-${Date.now()}.webm`}>
-                    <Download className="w-4 h-4 mr-2" /> Export
-                  </a>
-                </Button>
+        {/* Master Controls & Metronome */}
+        <div className="flex items-center gap-3">
+          {/* Metronome */}
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-950/70 border border-zinc-800 text-xs">
+            <button
+              onClick={() => setIsMetronomePlaying((p) => !p)}
+              className={cn(
+                "p-1.5 rounded-md transition-colors",
+                isMetronomePlaying ? "bg-indigo-600 text-white animate-pulse" : "text-zinc-400 hover:text-white"
               )}
-            </div>
+              title="Toggle Metronome"
+            >
+              <Music2 className="w-3.5 h-3.5" />
+            </button>
+            <input
+              type="number"
+              min="40"
+              max="240"
+              value={bpm}
+              onChange={(e) => setBpm(Number(e.target.value))}
+              className="w-12 bg-transparent text-center text-xs font-mono font-bold text-indigo-300 outline-none"
+            />
+            <span className="text-[10px] text-zinc-500 font-mono">BPM</span>
           </div>
 
-          {/* SYNTH MODE */}
-          {instrument === "Synth" && (
-            <div className="relative w-full h-48 sm:h-72 rounded-xl overflow-hidden bg-zinc-950 border-4 border-zinc-900 shadow-[inset_0_10px_20px_rgba(0,0,0,0.5)] select-none z-10">
-              {/* White Keys */}
-              <div className="flex w-full h-full">
-                {whiteKeys.map(k => (
-                  <div
-                    key={k.note}
-                    onPointerDown={e => handleKeyInteraction(e, k.note, "down")}
-                    onPointerUp={e => handleKeyInteraction(e, k.note, "up")}
-                    onPointerLeave={e => handleKeyInteraction(e, k.note, "up")}
-                    onPointerEnter={e => handleKeyInteraction(e, k.note, "down")}
+          {/* Volume Control */}
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-950/70 border border-zinc-800">
+            <button
+              onClick={() => setIsMuted((p) => !p)}
+              className="text-zinc-400 hover:text-white transition-colors"
+            >
+              {isMuted || volume === 0 ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4 text-indigo-400" />}
+            </button>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={isMuted ? 0 : volume}
+              onChange={(e) => {
+                setIsMuted(false)
+                setVolume(Number(e.target.value))
+              }}
+              className="w-16 sm:w-20 accent-indigo-500 h-1 bg-zinc-800 rounded-lg cursor-pointer"
+            />
+          </div>
+
+          {/* Recorder Button */}
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={toggleRecording}
+              className={cn(
+                "h-8 px-3 text-xs font-bold transition-all rounded-lg",
+                isRecording
+                  ? "bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30 animate-pulse"
+                  : "bg-zinc-800 text-zinc-200 border border-zinc-700 hover:bg-zinc-700"
+              )}
+            >
+              {isRecording ? (
+                <>
+                  <Square className="w-3 h-3 mr-1.5 fill-current text-red-500" />
+                  <span>{formatTime(recordTime)}</span>
+                </>
+              ) : (
+                <>
+                  <Mic className="w-3 h-3 mr-1.5 text-red-400" />
+                  <span>Record</span>
+                </>
+              )}
+            </Button>
+
+            {recordedUrl && (
+              <Button size="sm" asChild className="h-8 px-3 text-xs bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/30 rounded-lg">
+                <a href={recordedUrl} download={`studio-take-${Date.now()}.webm`}>
+                  <Download className="w-3 h-3 mr-1" /> Export
+                </a>
+              </Button>
+            )}
+          </div>
+
+          {/* Help Modal Toggle */}
+          <button
+            onClick={() => setShowHelpModal(true)}
+            className="p-2 rounded-xl bg-zinc-950/70 border border-zinc-800 text-zinc-400 hover:text-white transition-colors"
+            title="Keyboard Shortcuts Cheat Sheet"
+          >
+            <HelpCircle className="w-4 h-4" />
+          </button>
+        </div>
+      </header>
+
+      {/* MAIN PLAYABLE INSTRUMENT DISPLAY CANVAS */}
+      <main className="relative z-10 w-full max-w-7xl mx-auto my-auto py-6">
+        {/* AUDIO ACTIVATION OVERLAY */}
+        {!isAudioStarted && (
+          <div
+            onClick={ensureAudioStarted}
+            className="absolute inset-0 z-50 rounded-2xl bg-zinc-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 border border-zinc-800 shadow-2xl cursor-pointer group"
+          >
+            <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center shadow-2xl shadow-indigo-500/40 group-hover:scale-110 transition-transform mb-4">
+              <Play className="w-8 h-8 text-white fill-white ml-1" />
+            </div>
+            <h2 className="text-xl font-bold text-white tracking-wide mb-1">Click or Press Any Key to Start Studio</h2>
+            <p className="text-xs text-zinc-400 font-mono">Unlocks Web Audio API sound engine & computer keyboard mapping</p>
+          </div>
+        )}
+
+        {/* OCTAVE SELECTOR BAR */}
+        {instrument !== "Drums" && (
+          <div className="flex items-center justify-between mb-4 px-4 py-2 bg-zinc-900/40 rounded-xl border border-zinc-800/80 backdrop-blur-md">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-zinc-400 font-mono uppercase tracking-wider">Base Octave:</span>
+              <div className="flex gap-1">
+                {[1, 2, 3, 4, 5, 6].map((oct) => (
+                  <button
+                    key={oct}
+                    onClick={() => setBaseOctave(oct)}
                     className={cn(
-                      "flex-1 relative cursor-pointer group transition-colors duration-75",
-                      "bg-gradient-to-b from-white to-zinc-100 border-r border-zinc-300/80 rounded-b-md shadow-[inset_0_-8px_16px_rgba(0,0,0,0.1),_inset_0_2px_4px_rgba(255,255,255,1)]",
-                      activeNotes.has(k.note)
-                        ? "bg-gradient-to-b from-indigo-50 to-indigo-100 shadow-[inset_0_-4px_10px_rgba(79,70,229,0.3),_inset_0_0_20px_rgba(79,70,229,0.1)] -translate-y-[2px]"
-                        : "hover:bg-gradient-to-b hover:from-white hover:to-zinc-50"
+                      "w-7 h-7 rounded-lg text-xs font-mono font-bold transition-all",
+                      baseOctave === oct
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/30 scale-105"
+                        : "bg-zinc-800/60 text-zinc-400 hover:text-white hover:bg-zinc-700"
                     )}
                   >
-                    <div className="absolute bottom-4 left-0 w-full flex justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <div className="w-3 h-3 rounded-full bg-zinc-300/50 mix-blend-multiply"></div>
-                    </div>
-                    {k.note.startsWith("C") && (
-                      <span className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] items-center font-bold text-zinc-400 select-none pointer-events-none">
-                        {k.note}
+                    C{oct}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="hidden sm:flex items-center gap-4 text-xs font-mono text-zinc-400">
+              <span>Shift Octave: <kbd className="px-1.5 py-0.5 bg-zinc-800 rounded border border-zinc-700 text-zinc-300">←</kbd> <kbd className="px-1.5 py-0.5 bg-zinc-800 rounded border border-zinc-700 text-zinc-300">→</kbd></span>
+              <span>Help: <kbd className="px-1.5 py-0.5 bg-zinc-800 rounded border border-zinc-700 text-zinc-300">?</kbd></span>
+            </div>
+          </div>
+        )}
+
+        {/* VIEW 1: PIANO / SYNTH / RHODES / STRINGS / ORGAN */}
+        {["Piano", "Synth", "Rhodes", "Strings", "Organ"].includes(instrument) && (
+          <div className="relative w-full h-64 sm:h-72 md:h-80 rounded-2xl overflow-hidden bg-zinc-950 border-4 border-zinc-900 shadow-[0_20px_50px_rgba(0,0,0,0.8)] select-none">
+            {/* White Keys */}
+            <div className="flex w-full h-full">
+              {whiteKeys.map((k) => {
+                const isActive = activeNotes.has(k.note)
+                return (
+                  <div
+                    key={k.note}
+                    onMouseDown={(e) => { e.preventDefault(); playNote(k.note) }}
+                    onMouseUp={() => stopNote(k.note)}
+                    onMouseLeave={() => stopNote(k.note)}
+                    onMouseEnter={(e) => { if (e.buttons === 1) playNote(k.note) }}
+                    onTouchStart={(e) => { e.preventDefault(); playNote(k.note) }}
+                    onTouchEnd={() => stopNote(k.note)}
+                    className={cn(
+                      "flex-1 relative cursor-pointer group transition-all duration-75 flex flex-col justify-end items-center pb-3 border-r border-zinc-300/40 rounded-b-md select-none",
+                      "bg-gradient-to-b from-zinc-100 via-white to-zinc-200 shadow-[inset_0_-10px_20px_rgba(0,0,0,0.1)]",
+                      isActive
+                        ? "bg-gradient-to-b from-indigo-100 via-indigo-200 to-indigo-400 shadow-[inset_0_-4px_15px_rgba(79,70,229,0.5)] -translate-y-1"
+                        : "hover:bg-gradient-to-b hover:from-white hover:to-zinc-100"
+                    )}
+                  >
+                    {/* Visual Keyboard Shortcut Badge */}
+                    {k.hotkey && (
+                      <span className={cn(
+                        "text-[10px] font-mono font-bold px-1.5 py-0.5 rounded shadow-sm transition-transform mb-1 select-none pointer-events-none",
+                        isActive
+                          ? "bg-indigo-600 text-white scale-110"
+                          : "bg-zinc-800/80 text-zinc-200 border border-zinc-700"
+                      )}>
+                        {k.hotkey}
                       </span>
                     )}
+
+                    {/* Note Label */}
+                    <span className="text-[10px] font-mono font-bold text-zinc-400 select-none pointer-events-none">
+                      {k.note}
+                    </span>
                   </div>
-                ))}
-              </div>
-
-              {/* Black Keys */}
-              <div className="absolute inset-0 pointer-events-none">
-                {blackKeys.map(k => {
-                  const w = 100 / 61
-                  return (
-                    <div
-                      key={k.note}
-                      className="absolute top-0 h-[65%] pointer-events-auto"
-                      style={{
-                        left: `${k.positionIndex * w}%`,
-                        width: `${w * 0.65}%`,
-                        transform: "translateX(-50%)"
-                      }}
-                    >
-                      <div
-                        onPointerDown={e => handleKeyInteraction(e, k.note, "down")}
-                        onPointerUp={e => handleKeyInteraction(e, k.note, "up")}
-                        onPointerLeave={e => handleKeyInteraction(e, k.note, "up")}
-                        onPointerEnter={e => handleKeyInteraction(e, k.note, "down")}
-                        className={cn(
-                          "w-full h-full rounded-b-lg cursor-pointer transition-all duration-75",
-                          "bg-gradient-to-b from-zinc-800 to-zinc-950 border-x border-b border-black",
-                          "shadow-[inset_0_-6px_10px_rgba(255,255,255,0.1),_inset_0_2px_4px_rgba(0,0,0,0.5),_2px_4px_6px_rgba(0,0,0,0.6)]",
-                          activeNotes.has(k.note)
-                            ? "bg-gradient-to-b from-indigo-900 to-indigo-950 shadow-[inset_0_-2px_10px_rgba(79,70,229,0.4),_0_0_20px_rgba(79,70,229,0.5)] -translate-y-[2px]"
-                            : "hover:bg-gradient-to-b hover:from-zinc-700 hover:to-zinc-900"
-                        )}
-                      >
-                        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-full flex justify-center px-1">
-                          <div className="w-full h-1 bg-gradient-to-b from-zinc-700/50 to-transparent rounded-full mix-blend-lighten"></div>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-b from-zinc-900 to-transparent opacity-80 pointer-events-none z-20"></div>
+                )
+              })}
             </div>
-          )}
 
-          {/* GUITAR / BASS MODE (FRETBOARD INTERFACE) */}
-          {(instrument === "Guitar" || instrument === "Bass") && (
-            <div className="relative w-full overflow-hidden rounded-xl border-4 border-amber-950 bg-[#1e0a00] shadow-[inset_0_10px_30px_rgba(0,0,0,0.9),0_10px_20px_rgba(0,0,0,0.5)] select-none">
-              <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-overlay"></div>
-              {/* Fretboard wood texture overlay using gradients */}
-              <div className="absolute inset-0 bg-gradient-to-r from-amber-950 via-[#3e1e04] to-amber-950 opacity-90"></div>
+            {/* Black Keys */}
+            <div className="absolute inset-0 pointer-events-none">
+              {blackKeys.map((k) => {
+                const isActive = activeNotes.has(k.note)
+                const widthPercent = 100 / whiteKeys.length
 
-              <div className="relative w-full h-64 sm:h-80 flex flex-col py-2 z-10">
-                {/* Strings (Render 4 for Bass, 6 for Guitar) */}
-                {Array.from({ length: instrument === "Bass" ? 4 : 6 }).map((_, stringIdx) => (
-                  <div key={`string-${stringIdx}`} className="flex-1 relative flex items-center group/string">
-
-                    {/* The physical String Line */}
-                    <div className="absolute left-0 w-full h-1.5 sm:h-2 pointer-events-none z-20 transform -translate-y-1/2 flex items-center shadow-lg">
-                      <div className={cn(
-                        "w-full h-full shadow-[0_2px_4px_rgba(0,0,0,0.5)]",
-                        stringIdx < 2 && instrument === "Guitar"
-                          ? "bg-gradient-to-b from-slate-200 to-slate-400 h-1" // High unwound strings
-                          : "bg-gradient-to-b from-[#e2c792] via-[#a38c52] to-[#e2c792] h-2 bg-[length:4px_100%] bg-repeat-x", // Bronze wound strings
-                        "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9InRyYW5zcGFyZW50Ii8+PGxpbmUgeDE9IjAiIHkxPSIwIiB4Mj0iMCIgeTI9IjQiIHN0cm9rZT0icmdiYSgwLDAsMCwwLjMpIiBzdHJva2Utd2lkdGg9IjIiLz48L3N2Zz4=')]"
-                      )} />
-                    </div>
-
-                    {/* Frets */}
-                    <div className="flex w-full h-full z-30">
-                      {Array.from({ length: FRETS_COUNT }).map((_, fretIdx) => {
-                        const note = getGuitarNote(instrument === "Bass" ? stringIdx + 2 : stringIdx, fretIdx);
-                        const isPlaying = activeNotes.has(note);
-
-                        // Fret markers (dots) logic
-                        const hasMarker = (instrument === "Bass" && stringIdx === 1) || (instrument === "Guitar" && stringIdx === 2);
-                        const isDotFret = [3, 5, 7, 9].includes(fretIdx);
-                        const isDoubleDotFret = fretIdx === 12;
-
-                        return (
-                          <div
-                            key={`fret-${stringIdx}-${fretIdx}`}
-                            onPointerDown={e => handleKeyInteraction(e, note, "down")}
-                            onPointerEnter={e => handleKeyInteraction(e, note, "down")}
-                            // We don't trigger "up" for guitar to let `triggerAttackRelease` ring
-                            onPointerUp={() => { }}
-                            onPointerLeave={() => { }}
-                            className={cn(
-                              "relative flex-1 cursor-crosshair border-r-2 border-slate-400/30 transition-all duration-[50ms]",
-                              fretIdx === 0 ? "border-l-8 border-l-stone-100 shadow-[inset_4px_0_10px_rgba(0,0,0,0.5)]" : "", // Nut
-                              isPlaying ? "bg-amber-500/30 backdrop-brightness-150 backdrop-blur-sm shadow-[inset_0_0_20px_rgba(245,158,11,0.4)]" : "hover:bg-white/5",
-                            )}
-                          >
-                            {/* String Vibration Effect */}
-                            {isPlaying && (
-                              <div className="absolute top-1/2 left-0 w-full h-4 -translate-y-1/2 bg-white/20 blur-sm animate-pulse pointer-events-none"></div>
-                            )}
-
-                            {/* Inlay Dots */}
-                            {hasMarker && isDotFret && (
-                              <div className="absolute top-full left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-slate-200/40 shadow-inner z-0 pointer-events-none border border-slate-300/20"></div>
-                            )}
-                            {hasMarker && isDoubleDotFret && stringIdx === (instrument === "Bass" ? 1 : 2) && (
-                              <>
-                                <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-[150%] w-4 h-4 rounded-full bg-slate-200/40 shadow-inner z-0 pointer-events-none border border-slate-300/20"></div>
-                                <div className="absolute top-full left-1/2 -translate-x-1/2 translate-y-[50%] w-4 h-4 rounded-full bg-slate-200/40 shadow-inner z-0 pointer-events-none border border-slate-300/20"></div>
-                              </>
-                            )}
-
-                            {/* Note Label */}
-                            <span className={cn(
-                              "absolute bottom-0 right-1 text-[9px] font-bold select-none pointer-events-none",
-                              isPlaying ? "text-amber-200" : "text-amber-900/50"
-                            )}>
-                              {note}
-                            </span>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* DRUM MACHINE MODE (MPC STYLE PADS) */}
-          {instrument === "Drums" && (
-            <div className="w-full bg-zinc-950/80 p-6 sm:p-10 rounded-2xl border-2 border-zinc-800 shadow-[inset_0_0_50px_rgba(0,0,0,0.8)]">
-              <div className="mb-6 flex items-center justify-between bg-zinc-900/80 p-3 rounded-lg border border-zinc-800 shadow-inner">
-                <div className="flex items-center gap-2 text-zinc-400 font-mono text-xs uppercase tracking-widest">
-                  <div className="w-2 h-2 rounded-full bg-red-600 animate-pulse"></div>
-                  MPC-88 Drum Rack
-                </div>
-                <div className="text-zinc-500 font-mono text-xs">BANK A // 8 PADS</div>
-              </div>
-
-              <div className="grid grid-cols-4 sm:grid-cols-4 gap-4 sm:gap-6 max-w-4xl mx-auto">
-                {DRUM_PADS.map((pad, idx) => {
-                  const isPlaying = activeNotes.has(pad.note);
-                  return (
+                return (
+                  <div
+                    key={k.note}
+                    className="absolute top-0 h-[62%] pointer-events-auto z-30"
+                    style={{
+                      left: `${k.positionIndex * widthPercent}%`,
+                      width: `${widthPercent * 0.65}%`,
+                      transform: "translateX(-50%)"
+                    }}
+                  >
                     <div
-                      key={idx}
-                      onPointerDown={e => handleKeyInteraction(e, pad.note, "down")}
-                      onPointerUp={e => handleKeyInteraction(e, pad.note, "up")}
-                      onPointerLeave={e => handleKeyInteraction(e, pad.note, "up")}
+                      onMouseDown={(e) => { e.preventDefault(); playNote(k.note) }}
+                      onMouseUp={() => stopNote(k.note)}
+                      onMouseLeave={() => stopNote(k.note)}
+                      onMouseEnter={(e) => { if (e.buttons === 1) playNote(k.note) }}
+                      onTouchStart={(e) => { e.preventDefault(); playNote(k.note) }}
+                      onTouchEnd={() => stopNote(k.note)}
                       className={cn(
-                        "relative cursor-pointer transition-all duration-75 select-none user-select-none",
-                        "flex flex-col items-center justify-center min-h-[100px] sm:min-h-[120px]",
-                        "border-2 shadow-[0_4px_15px_rgba(0,0,0,0.5),inset_0_2px_10px_rgba(255,255,255,0.1)]",
-                        pad.rounded || "rounded-xl",
-                        `col-span-${pad.colSpan || 1}`,
-                        pad.rowSpan ? `row-span-${pad.rowSpan}` : "",
-                        isPlaying
-                          ? `scale-[0.97] shadow-[inset_0_5px_15px_rgba(0,0,0,0.8)] bg-gradient-to-br ${pad.bg} brightness-150 border-white/40`
-                          : `bg-gradient-to-br ${pad.bg} ${pad.border} ${pad.hover}`
+                        "w-full h-full rounded-b-lg cursor-pointer transition-all duration-75 flex flex-col justify-end items-center pb-2 border-x border-b border-black select-none",
+                        "bg-gradient-to-b from-zinc-800 via-zinc-900 to-black shadow-[0_8px_15px_rgba(0,0,0,0.8),inset_0_2px_4px_rgba(255,255,255,0.1)]",
+                        isActive
+                          ? "bg-gradient-to-b from-indigo-700 via-indigo-900 to-indigo-950 shadow-[0_0_20px_rgba(99,102,241,0.8)] -translate-y-1"
+                          : "hover:bg-gradient-to-b hover:from-zinc-700 hover:to-zinc-900"
                       )}
                     >
-                      {/* Active Ring Glow */}
-                      {isPlaying && <div className="absolute inset-0 bg-white/10 blur-md rounded-[inherit]"></div>}
-
-                      {/* Hardware screw details */}
-                      <div className="absolute top-2 left-2 w-1.5 h-1.5 rounded-full bg-black/60 shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]"></div>
-                      <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-black/60 shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]"></div>
-                      <div className="absolute bottom-2 left-2 w-1.5 h-1.5 rounded-full bg-black/60 shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]"></div>
-                      <div className="absolute bottom-2 right-2 w-1.5 h-1.5 rounded-full bg-black/60 shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]"></div>
-
-                      <div className={cn("relative z-10 font-black tracking-wider text-sm sm:text-base",
-                        pad.text || "text-white/90",
-                        isPlaying && "scale-105"
-                      )}>
-                        {pad.label}
-                      </div>
-                      <div className={cn("mt-1 opacity-50 font-mono text-[10px]", pad.text || "text-white")}>
-                        NOTE: {pad.note}
-                      </div>
-
-                      {/* Physical pad geometry illusion */}
-                      <div className="absolute inset-2 border border-white/5 rounded-[inherit] pointer-events-none"></div>
+                      {/* Visual Hotkey Badge */}
+                      {k.hotkey && (
+                        <span className={cn(
+                          "text-[9px] font-mono font-bold px-1 py-0.5 rounded shadow-sm select-none pointer-events-none",
+                          isActive
+                            ? "bg-indigo-500 text-white"
+                            : "bg-zinc-800 text-zinc-300 border border-zinc-700"
+                        )}>
+                          {k.hotkey}
+                        </span>
+                      )}
                     </div>
-                  )
-                })}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* VIEW 2: ACOUSTIC GUITAR & ELECTRIC BASS */}
+        {(instrument === "Guitar" || instrument === "Bass") && (
+          <div className="relative w-full overflow-hidden rounded-2xl border-4 border-amber-950 bg-[#1a0c04] shadow-[0_20px_50px_rgba(0,0,0,0.9)] select-none">
+            <div className="absolute inset-0 bg-gradient-to-r from-amber-950 via-[#3a1d06] to-amber-950 opacity-95" />
+
+            <div className="relative w-full h-64 sm:h-72 md:h-80 flex flex-col justify-around py-3 z-10">
+              {Array.from({ length: instrument === "Bass" ? 4 : 6 }).map((_, stringIdx) => (
+                <div key={stringIdx} className="relative flex-1 flex items-center group">
+                  <div className="absolute left-0 w-full h-1 z-20 pointer-events-none transform -translate-y-1/2 flex items-center shadow-lg">
+                    <div className={cn(
+                      "w-full h-full shadow-[0_2px_4px_rgba(0,0,0,0.8)]",
+                      stringIdx < 2 && instrument === "Guitar"
+                        ? "bg-gradient-to-b from-slate-200 to-slate-400 h-0.5"
+                        : "bg-gradient-to-b from-amber-300 via-amber-600 to-amber-400 h-1.5"
+                    )} />
+                  </div>
+
+                  <div className="flex w-full h-full z-30">
+                    {Array.from({ length: FRETS_COUNT }).map((_, fretIdx) => {
+                      const note = getGuitarNote(stringIdx, fretIdx)
+                      const isPlaying = activeNotes.has(note)
+                      const isNut = fretIdx === 0
+
+                      return (
+                        <div
+                          key={fretIdx}
+                          onMouseDown={(e) => { e.preventDefault(); playNote(note) }}
+                          onMouseEnter={(e) => { if (e.buttons === 1) playNote(note) }}
+                          onTouchStart={(e) => { e.preventDefault(); playNote(note) }}
+                          className={cn(
+                            "relative flex-1 cursor-pointer border-r-2 border-amber-200/20 transition-all flex items-center justify-center",
+                            isNut ? "border-l-8 border-l-stone-200 bg-amber-950/40" : "",
+                            isPlaying
+                              ? "bg-indigo-500/40 backdrop-brightness-150 shadow-[inset_0_0_20px_rgba(99,102,241,0.6)]"
+                              : "hover:bg-white/5"
+                          )}
+                        >
+                          <span className={cn(
+                            "text-[9px] font-mono font-bold select-none pointer-events-none z-40 px-1 rounded",
+                            isPlaying ? "bg-indigo-600 text-white scale-110" : "text-amber-200/50"
+                          )}>
+                            {note}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* VIEW 3: MPC DRUM KIT */}
+        {instrument === "Drums" && (
+          <div className="w-full bg-zinc-950/90 p-6 sm:p-8 rounded-2xl border-2 border-zinc-800 shadow-[0_20px_50px_rgba(0,0,0,0.9)] backdrop-blur-xl">
+            <div className="flex items-center justify-between mb-6 pb-4 border-b border-zinc-800">
+              <div className="flex items-center gap-2 text-xs font-mono font-bold text-zinc-400 uppercase tracking-widest">
+                <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+                MPC-88 DRUM MATRIX
+              </div>
+              <div className="text-xs font-mono text-zinc-500">
+                PLAYABLE VIA KEYBOARD [<kbd className="px-1 bg-zinc-800 rounded text-zinc-300">1-8</kbd> or <kbd className="px-1 bg-zinc-800 rounded text-zinc-300">A,S,D,F,Q,W,E,R</kbd>]
               </div>
             </div>
-          )}
 
-          {/* KEYBOARD SHORTCUTS HINTS */}
-          {instrument === "Synth" && (
-            <div className="grid grid-cols-2 gap-4 text-xs text-zinc-400 font-mono bg-zinc-950/40 rounded-xl p-4 border border-zinc-800/50 shadow-inner">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6">
+              {DRUM_PADS.map((pad) => {
+                const isActive = activeDrumKeys.has(pad.key)
+                return (
+                  <div
+                    key={pad.key}
+                    onMouseDown={(e) => { e.preventDefault(); triggerDrum(pad.key) }}
+                    onTouchStart={(e) => { e.preventDefault(); triggerDrum(pad.key) }}
+                    className={cn(
+                      "relative cursor-pointer min-h-[110px] sm:min-h-[130px] rounded-2xl border-2 p-4 flex flex-col justify-between transition-all duration-75 select-none shadow-xl",
+                      "bg-gradient-to-br backdrop-blur-md",
+                      pad.color,
+                      isActive
+                        ? "scale-[0.96] brightness-150 shadow-[0_0_30px_rgba(255,255,255,0.4)] border-white"
+                        : "hover:scale-[1.02] hover:brightness-125"
+                    )}
+                  >
+                    <div className="flex items-center justify-between w-full">
+                      <div className="flex gap-1">
+                        {pad.hotkeys.map((hk) => (
+                          <span
+                            key={hk}
+                            className={cn(
+                              "text-[11px] font-mono font-black px-2 py-0.5 rounded shadow-md border",
+                              isActive
+                                ? "bg-white text-zinc-950 border-white"
+                                : "bg-zinc-950/80 text-zinc-200 border-zinc-700"
+                            )}
+                          >
+                            {hk}
+                          </span>
+                        ))}
+                      </div>
+                      <span className="text-[10px] font-mono text-zinc-400 font-bold">{pad.note}</span>
+                    </div>
+
+                    <div>
+                      <h3 className="text-base sm:text-lg font-bold tracking-tight text-white">{pad.label}</h3>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* FOOTER */}
+      <footer className="relative z-20 w-full max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 pt-4 border-t border-zinc-800/60 text-xs text-zinc-500 font-mono">
+        <div>
+          <span>100% RUNNABLE • HIGH PERFORMANCE WEB AUDIO STUDIO</span>
+        </div>
+        <div className="flex items-center gap-4">
+          <span>Keyboard: <strong className="text-zinc-300">A-Z, 0-9, [, ]</strong></span>
+          <span>MIDI: <strong className="text-zinc-300">Web MIDI API</strong></span>
+        </div>
+      </footer>
+
+      {/* KEYBOARD SHORTCUTS INSTRUCTION MODAL */}
+      {showHelpModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl space-y-5 text-zinc-200">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2">
-                <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700 rounded text-zinc-300 font-bold shadow-sm">Z</kbd>
-                <span className="opacity-50">-</span>
-                <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700 rounded text-zinc-300 font-bold shadow-sm">M</kbd>
-                <span className="ml-2 px-2 py-0.5 bg-indigo-500/10 text-indigo-400 rounded-md">Lower Octave</span>
+                <HelpCircle className="w-5 h-5 text-indigo-400" />
+                <h3 className="text-lg font-bold text-white">Computer Keyboard Controls</h3>
               </div>
-              <div className="flex items-center justify-end gap-2">
-                <span className="mr-2 px-2 py-0.5 bg-purple-500/10 text-purple-400 rounded-md">Upper Octave</span>
-                <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700 rounded text-zinc-300 font-bold shadow-sm">Q</kbd>
-                <span className="opacity-50">-</span>
-                <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700 rounded text-zinc-300 font-bold shadow-sm">P</kbd>
+              <button
+                onClick={() => setShowHelpModal(false)}
+                className="p-1 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs font-mono">
+              <div>
+                <h4 className="font-bold text-indigo-400 uppercase mb-1">Piano & Synthesizers (2 Octaves):</h4>
+                <p className="text-zinc-400 mb-2">Lower octave white keys: <kbd className="px-1 bg-zinc-800 rounded text-zinc-200">Z X C V B N M , . /</kbd></p>
+                <p className="text-zinc-400 mb-2">Lower octave black keys: <kbd className="px-1 bg-zinc-800 rounded text-zinc-200">S D G H J L ;</kbd></p>
+                <p className="text-zinc-400 mb-2">Upper octave white keys: <kbd className="px-1 bg-zinc-800 rounded text-zinc-200">Q W E R T Y U I O P [ ]</kbd></p>
+                <p className="text-zinc-400">Upper octave black keys: <kbd className="px-1 bg-zinc-800 rounded text-zinc-200">2 3 5 6 7 9 0 =</kbd></p>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-red-400 uppercase mb-1">MPC Drum Kit:</h4>
+                <p className="text-zinc-400">Press keys <kbd className="px-1 bg-zinc-800 rounded text-zinc-200">1 to 8</kbd> or <kbd className="px-1 bg-zinc-800 rounded text-zinc-200">A, S, D, F, Q, W, E, R</kbd> to trigger Kick, Snare, Hi-Hats, Toms, Crash & Ride.</p>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-emerald-400 uppercase mb-1">Octave Controls & Shortcuts:</h4>
+                <p className="text-zinc-400">Shift Base Octave up/down with <kbd className="px-1 bg-zinc-800 rounded text-zinc-200">Left Arrow</kbd> and <kbd className="px-1 bg-zinc-800 rounded text-zinc-200">Right Arrow</kbd>.</p>
               </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
 
-      {/* Background radial gradients for depth */}
-      <div className={cn("fixed top-1/4 left-1/4 w-96 h-96 rounded-full blur-[120px] pointer-events-none z-0 transition-all duration-1000",
-        instrument === "Synth" ? "bg-indigo-500/10" :
-          instrument === "Guitar" || instrument === "Bass" ? "bg-amber-500/10" :
-            "bg-red-500/10"
-      )}></div>
-      <div className={cn("fixed bottom-1/4 right-1/4 w-[30rem] h-[30rem] rounded-full blur-[150px] pointer-events-none z-0 transition-all duration-1000",
-        instrument === "Synth" ? "bg-purple-500/10" :
-          instrument === "Guitar" || instrument === "Bass" ? "bg-orange-600/10" :
-            "bg-zinc-500/10"
-      )}></div>
+            <Button
+              onClick={() => setShowHelpModal(false)}
+              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl"
+            >
+              Got it, let's play!
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
